@@ -71,29 +71,55 @@ def parse_csv(file_or_path):
     reader = csv.DictReader(f, delimiter='\t')  # 使用制表符作为分隔符
 
     for row in reader:
-        d   = row.get(COLS['date'], '').strip()
-        ch  = row.get(COLS['channel'], '?').strip()
-        pt  = row.get(COLS['ptype'], 'normal').strip().lower()
-        pid = row.get(COLS['plan_id'], '').strip()
-        own = row.get(COLS['owner'], '').strip() or '未知'
+        # 获取各个字段，确保不为None
+        date_val = row.get(COLS['date'])
+        channel_val = row.get(COLS['channel'])
+        ptype_val = row.get(COLS['ptype'])
+        plan_id_val = row.get(COLS['plan_id'])
         
-        # 跳过表头行或空日期行
-        if not d or d == COLS['date']:
+        # 检查关键字段是否存在且非空
+        if not date_val or str(date_val).strip() == '' or date_val == COLS['date']:
             continue
-            
+        if not channel_val:
+            channel_val = '?'
+        if not ptype_val:
+            ptype_val = 'normal'
+        if not plan_id_val:
+            continue  # Plan ID 是必需的
+        
+        d   = str(date_val).strip()
+        ch  = str(channel_val).strip()
+        pt  = str(ptype_val).strip().lower()
+        pid = str(plan_id_val).strip()
+        own = str(row.get(COLS['owner'], '')).strip() or '未知'
+        
         try:
-            c  = float(row.get(COLS['click'], 0) or 0)
-            r  = float(row.get(COLS['reach'], 0) or 0)
-            g  = float(row.get(COLS['gc'], 0) or 0)
-            s  = float(row.get(COLS['sales'], 0) or 0)
-            oc = float(row.get(COLS['order_click'], 0) or 0)
-            rp = float(row.get(COLS['reach_plan'], 0) or 0)
+            # 安全地获取数值字段，处理可能的空值或非数字值
+            click_val = row.get(COLS['click'], 0)
+            reach_val = row.get(COLS['reach'], 0)
+            gc_val = row.get(COLS['gc'], 0)
+            sales_val = row.get(COLS['sales'], 0)
+            order_click_val = row.get(COLS['order_click'], 0)
+            reach_plan_val = row.get(COLS['reach_plan'], 0)
+            
+            c  = float(click_val) if click_val and str(click_val).strip() != '' else 0.0
+            r  = float(reach_val) if reach_val and str(reach_val).strip() != '' else 0.0
+            g  = float(gc_val) if gc_val and str(gc_val).strip() != '' else 0.0
+            s  = float(sales_val) if sales_val and str(sales_val).strip() != '' else 0.0
+            oc = float(order_click_val) if order_click_val and str(order_click_val).strip() != '' else 0.0
+            rp = float(reach_plan_val) if reach_plan_val and str(reach_plan_val).strip() != '' else 0.0
         except (ValueError, TypeError):
             continue
 
-        # 标准化日期：去前导零
-        parts = d.split()[0].split('/') if ' ' in d else d.split('/')
-        d = f"{parts[0]}/{int(parts[1])}/{int(parts[2])}"
+        # 标准化日期：去前导零，同时处理不同日期格式
+        try:
+            d_clean = d.split()[0] if ' ' in d else d  # 只取日期部分，去掉时间
+            parts = d_clean.split('/')
+            if len(parts) != 3:
+                continue  # 日期格式不正确，跳过该行
+            d = f"{parts[0]}/{int(parts[1])}/{int(parts[2])}"
+        except (IndexError, ValueError):
+            continue  # 日期格式错误，跳过该行
 
         # 初始化嵌套字典结构
         if d not in rows_raw:
@@ -132,9 +158,12 @@ def parse_csv(file_or_path):
     f.close()
 
     def _key(d):
-        p = d.split('/')
-        return (int(p[1]), int(p[2]))
-    all_dates = sorted(rows_raw.keys(), key=_key)
+        try:
+            p = d.split('/')
+            return (int(p[1]), int(p[2]))
+        except (IndexError, ValueError):
+            return (0, 0)  # 错误日期返回默认值
+    all_dates = sorted([d for d in rows_raw.keys() if d], key=_key)
     return rows_raw, plan_cnt_all, owner_agg, all_dates
 
 
@@ -147,7 +176,10 @@ def calc_date_range(all_dates):
         return None, None, []
     latest = all_dates[-1]
     parts = latest.split('/')
-    latest_dt = datetime(int(parts[0]), int(parts[1]), int(parts[2]))
+    try:
+        latest_dt = datetime(int(parts[0]), int(parts[1]), int(parts[2]))
+    except (ValueError, IndexError):
+        return None, None, []  # 日期格式错误
     prev_dt = latest_dt - timedelta(days=1)
     DATE_Y = latest  # 最新日期 = 昨日（已是去前导零格式）
     # 前日：去前导零保持一致
@@ -163,7 +195,7 @@ def calc_date_range(all_dates):
 def totals_all(rows_raw, dates):
     t = {'click':0,'reach':0,'gc':0,'sales':0,'order_click':0,'reach_plan':0}
     for d in dates:
-        if d not in rows_raw:
+        if not d or d not in rows_raw:
             continue
         for ch, pts in rows_raw[d].items():
             for pt, vals in pts.items():
@@ -175,7 +207,7 @@ def totals_all(rows_raw, dates):
 def ch_totals(rows_raw, ch, dates):
     t = {'click':0,'reach':0,'gc':0,'sales':0,'order_click':0,'reach_plan':0}
     for d in dates:
-        if d not in rows_raw or ch not in rows_raw[d]:
+        if not d or d not in rows_raw or ch not in rows_raw[d]:
             continue
         for pt, vals in rows_raw[d][ch].items():
             for k in t:
@@ -186,7 +218,7 @@ def ch_totals(rows_raw, ch, dates):
 def agg_ch_pt(rows_raw, ch, ptype, dates):
     t = {'click':0,'reach':0,'gc':0,'sales':0,'order_click':0,'reach_plan':0}
     for d in dates:
-        if d not in rows_raw or ch not in rows_raw[d]:
+        if not d or d not in rows_raw or ch not in rows_raw[d]:
             continue
         if ptype not in rows_raw[d][ch]:
             continue
@@ -207,7 +239,7 @@ def calc_s4_data(owner_agg, DATE_Y, DATE_P, DATE_W):
     def _sum(dates, ptype, owner):
         t = {k: 0.0 for k in METRICS}
         for d in dates:
-            if d not in owner_agg or ptype not in owner_agg[d]:
+            if not d or d not in owner_agg or ptype not in owner_agg[d]:
                 continue
             if owner not in owner_agg[d][ptype]:
                 continue
@@ -222,14 +254,14 @@ def calc_s4_data(owner_agg, DATE_Y, DATE_P, DATE_W):
     for ptype in ['aarr', 'normal']:
         owners = set()
         for d, pts in owner_agg.items():
-            if ptype in pts:
+            if d and ptype in pts:
                 owners.update(pts[ptype].keys())
 
         rows = []
         for owner in sorted(owners):
-            yd = _sum([DATE_Y], ptype, owner)
-            pd = _sum([DATE_P], ptype, owner)
-            wd = _sum(DATE_W, ptype, owner)
+            yd = _sum([DATE_Y], ptype, owner) if DATE_Y else {k: 0.0 for k in METRICS}
+            pd = _sum([DATE_P], ptype, owner) if DATE_P else {k: 0.0 for k in METRICS}
+            wd = _sum(DATE_W, ptype, owner) if DATE_W else {k: 0.0 for k in METRICS}
             rows.append({
                 'owner': owner,
                 'reach_plan_y': yd['reach_plan'],
