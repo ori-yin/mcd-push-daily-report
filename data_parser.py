@@ -4,7 +4,6 @@ data_parser.py - 麦当劳 Push 日报数据解析模块
 支持 Streamlit 上传和本地 CSV 两种模式
 """
 import csv, io
-import chardet
 from datetime import datetime, timedelta
 
 # 字段名映射 - 已更新 Plan Name -> Plan名称
@@ -25,37 +24,39 @@ COLS = {
 }
 
 def read_csv_with_encoding(file_or_path):
-    """读取CSV文件，支持UTF-8和GBK编码"""
+    """读取CSV文件，支持UTF-8和GBK编码（无需chardet依赖）"""
     if hasattr(file_or_path, 'read'):
         # 处理Streamlit上传的文件
-        pos = file_or_path.tell() if hasattr(file_or_path, 'tell') else 0
-        raw = file_or_path.read()
-        if hasattr(file_or_path, 'seek'):
-            file_or_path.seek(pos)
+        # 先读取原始字节数据
+        raw_data = file_or_path.read()
         
-        # 检测编码
-        encoding = chardet.detect(raw)['encoding']
-        if encoding is None:
-            encoding = 'utf-8'
-        elif 'gb' in encoding.lower():
-            encoding = 'gbk'
+        # 尝试不同的编码
+        for encoding in ['utf-8-sig', 'utf-8', 'gbk', 'gb2312']:
+            try:
+                if isinstance(raw_data, str):
+                    # 如果已经是字符串，直接使用
+                    text_data = raw_data
+                else:
+                    # 如果是字节，用指定编码解码
+                    text_data = raw_data.decode(encoding)
+                return io.StringIO(text_data)
+            except (UnicodeDecodeError, AttributeError):
+                continue
+        
+        # 如果所有编码都失败，强制用GBK忽略错误
+        if isinstance(raw_data, bytes):
+            text_data = raw_data.decode('gbk', errors='ignore')
         else:
-            encoding = 'utf-8'
-        
-        text = raw.decode(encoding) if isinstance(raw, bytes) else raw
-        return io.StringIO(text)
+            text_data = raw_data
+        return io.StringIO(text_data)
     else:
-        # 处理文件路径
-        with open(file_or_path, 'rb') as f:
-            raw = f.read()
-            encoding = chardet.detect(raw)['encoding']
-            if encoding is None:
-                encoding = 'utf-8'
-            elif 'gb' in encoding.lower():
-                encoding = 'gbk'
-            else:
-                encoding = 'utf-8'
-        return open(file_or_path, encoding=encoding)
+        # 处理文件路径（本地文件）
+        for encoding in ['utf-8-sig', 'utf-8', 'gbk', 'gb2312']:
+            try:
+                return open(file_or_path, encoding=encoding)
+            except UnicodeDecodeError:
+                continue
+        return open(file_or_path, encoding='gbk', errors='ignore')
 
 def parse_csv(file_or_path):
     """解析 CSV，返回 (rows_raw, plan_cnt_all, owner_agg, all_dates)
