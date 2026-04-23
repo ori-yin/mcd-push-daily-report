@@ -262,10 +262,6 @@ with col2:
 
             if owner_agg:
                 s4_by_ptype = {}
-
-
-
-
                 uploaded.seek(0)
                 # 复用 data_parser.py 中的编码处理函数
                 from data_parser import read_csv_with_encoding
@@ -278,17 +274,17 @@ with col2:
                     oid = row.get('预算owner', '[NULL]').strip()
                     if not d or d == SEND_DATE:
                         continue
+                    try:
+                        c  = float(row.get(CLICK_COL, 0) or 0)
+                        r  = float(row.get(REACH_COL, 0) or 0)
+                        g  = float(row.get(GC_COL, 0) or 0)
+                        s  = float(row.get(SALES_COL, 0) or 0)
+                        oc = float(row.get(ORDER_COL, 0) or 0)
+                        rp = float(row.get(PLAN_COL, 0) or 0)
+                    except:
+                        continue
                 f.close()
-                
-                        try:
-                            c  = float(row.get(CLICK_COL, 0) or 0)
-                            r  = float(row.get(REACH_COL, 0) or 0)
-                            g  = float(row.get(GC_COL, 0) or 0)
-                            s  = float(row.get(SALES_COL, 0) or 0)
-                            oc = float(row.get(ORDER_COL, 0) or 0)
-                            rp = float(row.get(PLAN_COL, 0) or 0)
-                        except:
-                            continue
+
                         if pt not in s4_by_ptype:
                             s4_by_ptype[pt] = {}
                         if oid not in s4_by_ptype[pt]:
